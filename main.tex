@@ -1,0 +1,1415 @@
+\documentclass[UTF8]{article}
+\usepackage{hyperref}
+\usepackage{amsmath}%决策树
+\usepackage{amsfonts}
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{defi}{Definition}
+\newtheorem{proof}{Proof}[section]
+\usepackage{graphicx}
+\usepackage{natbib}
+\usepackage{subfigure} %插入图片的宏包
+\usepackage{float} %设置图片浮动位置的宏包
+\usepackage{subfigure} %插入多图时用子图显示的宏包
+\usepackage{algorithm}
+\usepackage{algorithmic}
+\usepackage{tikz}
+\usetikzlibrary{graphs}
+\usetikzlibrary{shapes.geometric,fit,positioning,arrows,automata,calc}
+\tikzset{
+  main/.style={circle, minimum size = 5mm, thick, draw =black!80, node distance = 10mm},
+  connect/.style={-latex, thick},
+  box/.style={rectangle, draw=black!100}
+}
+%opening
+\title{Decision Trees in Computational Graph: Representation, Optimization and  Extension}
+%\large Illusion of Reasonability or Dawn of Explainability}
+\author{Zhang Jinxiong}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+
+Decision tree looks like a simple computational graph without cycles,
+where only the leaf nodes specify the output values and the non-terminals specify their tests or computation.
+We will express decision trees in the language of computational graph.
+As shown, the decision tree is a shallow binary network.
+\end{abstract}
+
+\section{Introduction}
+
+Computational graph is the descriptive language of deep learning models.
+\href{https://colah.github.io/posts/2015-08-Backprop/}{Christopher Olah} summarized :
+``To create a computational graph,
+we make each of these operations, along with the input variables, into nodes.
+When the value of one node  is the input to another node, an arrow goes from one to another.
+These sorts of graphs come up all the time in computer science,
+especially in talking about functional programs.
+They are very closely related to the notions of dependency graphs and call graphs.
+They are also the core abstraction behind the popular deep learning framework Theano."
+%https://ai.google/research/people/ChristopherOlah
+
+In deep neural network, the operation of non-terminals is a smooth activation function such as sigmoid or `ReLU'
+and it acts on every input in the element-wise sense.
+All inputs of the deep neural network share  \emph{the same depth and activation function} in computational graph.
+More complex architecture can include some `feedback structure'.
+
+In decision trees, the operation of non-terminal is a test function such as typical `statistical test'
+and it determines the input next state - for example terminated or not.
+Different inputs have different depth and test functions in decision trees.
+The test function depends on the `splitting criteria' when building a decision tree.
+In vanilla binary decision tree,
+the test function does not change the inputs
+and the final outputs of terminals depend on the labels of its instances.
+
+%We usually do not consider the decision tree in the
+%language of computational graph.
+In the following sections, a new representation of decision tree is proposed in the language of computational graph.
+It is shown that the decision tree is a shallow binary network.
+Thus we extend the field of computational graph beyond deep learning
+and acceleration techniques in deep learning may help to accelerate the tree-based learning algorithms.
+%The classification tree or categorical feature is not discussed.
+%One important issue is how to handle categorical features and
+%classification because these are the superiority of trees.
+A specific example is to illustrate this representation.
+More characters of  this representation are discussed in the decision tree structure matrix.
+The training of decision trees are formulated as constrained continuous optimization problem.
+We also propose the generalized decision trees and a novel ensemble way to composite generalized decision trees.
+
+
+\section{Parameterized Decision Trees: A New Representation}
+
+
+Different from building a decision tree, prediction of a decision tree is the tree traversal in essence.
+Inspired by \href{http://pages.di.unipi.it/rossano/wp-content/uploads/sites/7/2015/11/sigir15.pdf}{QuickScorer},
+we split such prediction to the following stages.
+We only consider the numerical features for simplicity and categorical features are discussed later.
+
+The first stage is to  find the false nodes in the decision tree with respect to the input $x$:
+   \begin{equation}h=\frac{\operatorname{Sign}(Sx-t)+1}{2}=D(Sx-t)\end{equation}
+where so-called `selection matrix' $S\in\mathbb{R}^{n_L\times n}$ consists of one-hot row vector in $\mathbb{R}^n$
+representing which feature is tested in a node;
+the elements of threshold vector $t\in\mathbb{R}^{n_L}$ are the optimal splitting points of each node associated with one feature;
+$Sign(\cdot)$ is the element-wise sign function
+and $Sign(0)=-1$;$D(x)$ is the \href{https://arxiv.org/pdf/1901.09731.pdf}{binarized ReLU} function defined by
+$$
+D(x_i)=\begin{cases}1, &\text{if $x_i> 0$}\\
+0, &\text{otherwise}\end{cases}.
+$$
+Here $n_L$ is the number of the non-terminals and $n$ is the dimension of input space.
+For convenience, we define that the node is a true node if its feature is greater than the splitting point
+otherwise the node is `false' node.
+%https://arxiv.org/pdf/1902.07419.pdf
+
+The second stage is to find bitvector\footnotemark of false nodes
+\begin{equation}H=B\, \,\operatorname{Diag}(h)\end{equation}
+where  $Diag(\cdot)$ maps a vector to a diagonal matrix;
+$B\in\mathbb{B}^{L\times n_L}$ is the bitvector matrix of the decision tree.
+Every column of $B$ is a bit-vector of node; the matrix $B\, \,\operatorname{Diag}(h)$
+is the matrix multiplication product of matrix $B$  and $\operatorname{Diag}(h)$.
+Here $L$ is the number of terminal nodes(leaves).
+
+\footnotetext{Every non-terminal node $n$ is associated with
+a node \href{http://pages.di.unipi.it/rossano/wp-content/uploads/sites/7/2015/11/sigir15.pdf}{bitvector}
+(of the same length),
+acting as a bitmask that encodes (with 0’s)
+the set of leaves to be removed from the subtree whenever $n$ is a false node.
+It is declared that \href{https://dl.acm.org/citation.cfm?id=2987380}{Domenico Dato et al}
+are the first to represent the non-terminal nodes as bitvectors.}
+
+The final stage is to determine the output
+\begin{equation}v[i],\quad
+i=\arg\max(Hp)\end{equation}
+where $p=(1, 2, \cdots, n_L-1, n_L)^T\in\mathbb{R}^{n_L}$ and $n_L$ is the number of the non-terminal nodes;
+$v[i]$ are the $i$th elements of vector $v$; $\arg\max(v)$ returns the index of the first maximum in the vector $v$.
+In fact the vector $p$ can be any positive vector such as $p=(1, 1, \cdots, 1,1)^T\in\mathbb{R}^{n_L}$.
+%Here $\operatorname{softnnorm}$ is element-wise operated on each element defined by
+%$$\operatorname{softnorm}(x)=   \left( \begin{array}{c}
+%          \frac{\exp(x_1)}{\exp(x_1)} \\
+%          \vdots \\
+%          \frac{\exp(x_L)}{\exp(x_L)}}
+% \end{array}\right)$$
+
+Observe that binarized ReLU $D$ is not differentiable.
+Note that the key is the index of the first maximum of the hidden state
+$$\{B\operatorname{Diag}[\underbrace{D(Sx-t)}_{\text{binary vector}}]\}p$$
+where if the test return true, the  element of the binary vector is zero;
+otherwise, the element of the binary vector is 1.
+The 1s select the bitvectors of false nodes and
+0s rule out the bitvectors of true nodes.
+If we change 1 to any positive number,
+the index of the first maximum of the hidden state does not change.
+Thus binarized ReLU is not the unique activation choice.
+For example, ReLU is  an alternative to binarized ReLU in our representation.
+We will show more alternatives of binarized ReLU later.
+We can rewrite the decision tree in a more compact form:
+\begin{equation}\label{tree}
+T(x)=v[\arg\max(B\,\sigma(Sx-t))]
+\end{equation}
+where  the element $v[i]$ are the $i$th element of vector $v$;
+the function $\arg\max(x)$ returns the index of the first maximum in the vector $x$;
+the matrix $B$ is the bitvector matrix of the decision tree;
+%the mapping $Diag(x)$ maps a vector to a diagonal matrix;
+the element-wise transformation $\sigma(\cdot)$ is the \href{https://arxiv.org/abs/1611.01491}{ReLU};
+the matrix $S$ is the selection matrix of the decision tree;
+the vector $x$ is the input data.
+
+
+The function ReLU is used to express the regression trees and adaptive splines for a continuous response
+by statisticians such as \href{https://b-ok.cc/book/891461/09b3e3}{Heping Zhang}.
+%ReLU
+%https://zhuanlan.zhihu.com/p/36519666
+%https://publichealth.yale.edu/c2s2/
+%https://b-ok.cc/book/891461/09b3e3
+
+Note that $v[i]=\left<v,  \vec 1_i\right>=\sum_{n=1}^{L}v[n] 1_i(n)$
+where $\vec 1_i=(0,0,\cdots,1,0,\cdots, 0)$
+and $1_i(n)=1$ if $n=i$ otherwise $1_i(n)=0$.
+The operator $\arg\max$ is equivalent to choose an one-hot vector.
+Here we do not specify the data type or any requirement on the value vector $v$.
+The element $v[i]$ can be anything even function.
+Usually it is numerical for regression and
+categorical/discrete for classification.
+%\href{http://pages.stat.wisc.edu/~loh/treeprogs/guide/wires11.pdf}{Wei-Yin Loh}
+
+
+Here is the hierarchical  structure of decision tree for regression:
+\begin{equation}
+\begin{aligned}
+&x            &\to &h &\to v[i]\\ \nonumber
+&\mathbb{R}^n &\to &\mathbb{R}_{+}^{n_L}&\to \mathbb{R}. \nonumber
+\end{aligned}
+\end{equation}
+Additionally, the element of value vector $v$ is categorical for classification trees.
+
+It is really a shallow model.
+And its hidden layers are sparse binary.
+
+Now there is nothing other than expressing the decision tree in the language of computational graph.
+It looks  far from a step function. However, note that
+\begin{itemize}
+%\item the operator $\otimes$  select the non-zero column vectors  of matrix.
+\item the matrices $S$ and $B$ are binary, i.e., their elements are 0 or 1.
+\item $\arg\max()$ only selects one element in this case.
+\end{itemize}
+All `if-then' tests are transformed to numerical computation.
+And the test phase and the traversal phase are split and separated.
+In test phase, we obtain the hidden state $h$ dependent on the selection matrix $S$ and threshold vector $t$.
+In traversal phase, we get the hidden state $H$ dependent on the bitvector matrix $B$
+and then arrive at the terminal node by multiplying the constant positive vector $p$.
+These two phases play different roles while they are connected and associated.
+All the input samples share the same computational procedure.
+This makes it more computation dense in prediction.
+The good news is that we can apply the high performance technology such as fast matrix multiplication
+to decision tree.
+
+The tuple $(S, t, B, v)$ really determines a decision tree.
+
+\begin{theorem}
+The mapping $M: T \mapsto (S, t, B, v)$ is bijective.
+\end{theorem}
+\begin{proof}
+It is only necessary to prove that it is equivalent to the theorem in
+\href{http://pages.di.unipi.it/rossano/wp-content/uploads/sites/7/2015/11/sigir15.pdf}{QuickScorer}.
+The key idea is that the leftmost non-zero element in the result of logical `AND' of bitvectors
+is the one which is not zero in every bitvector of its false nodes.
+\end{proof}
+
+
+
+This also provides some hints why the binary neural networks work
+if you believe in the reasonability of decision trees.
+In another hand, this representation tells us that
+the decision trees only have hidden layer with the binarized ReLU activation function.
+Why does it work so well?
+Where is the reasonability of decision trees?
+All reasonability may be our illusion as George Box's quotation
+``All models are wrong, but some are useful''.
+Even so we shall not cease from exploration to truth for the honor of the human mind.
+%Later we will show it is not a mathematical fancy trick without practical application.
+
+The bitvector is originally adopted to improve the efficiency of the tree-based ranking model.
+It is first time to illustrate how to perform an interleaved traversal of the ensemble
+by means of simple logical bitwise operations as following according to
+the \href{http://pages.di.unipi.it/rossano/wp-content/uploads/sites/7/2015/11/sigir15.pdf}{QuickScorer} algorithm.
+\begin{figure}[H] %H为当前位置，!htb为忽略美学标准，htbp为浮动图形
+\centering %图片居中
+\includegraphics[width=0.85\textwidth]{QS.png}
+\caption{Tree Traversal Example}  %最终文档中希望显示的图片标题
+\label{Fig.TTE} %用于文内引用的标签
+\footnotemark
+\end{figure}
+\footnotetext{This figure is copied from
+\href{https://www.cse.cuhk.edu.hk/irwin.king/_media/presentations/sigir15bestpaperslides.pdf}{the slides}
+presented in SIGIR15 by  Raffaele Perego.}
+
+As shown, this traversal is of fewer operations and insensitive to nodes' processing order.
+It is the fewer operations that matters to improve the performance of software.
+Our motivation of the representation \eqref{tree} is to describe the decision tree model
+in the language of computational graph
+so that we can take advantages of deep learning software packages to implement tree-based models.
+The nodes' processing order is our concern.
+We convert the logical bitwise operations to the matrix-vector multiplication.
+And we find  the false nodes via direct mathematical operations in our novel representation.
+It is end-to-end as deep  neural network.
+What is more, our representation is compatible with oblique decision tree as shown later.
+In theory, we introduce the bitvector matrix $B$.
+It is delicate that there is no columns with all elements equal to 1 in the bitvector matrix $B$.
+It is an open problem to find all the bitvector matrices of the given size decision trees.
+And we can use the bitvector matrix $B$ to describe the structure of decision tree.
+
+
+In \href{https://arxiv.org/abs/1806.06988}{Deep Neural Decision Trees}
+soft binning function is used to make the split decisions.
+Typically, a binning function takes as input a real scalar $x$
+and produces an index of the bins to which $x$ belongs.
+\href{https://arxiv.org/abs/1806.06988}{Yongxin Yang et al} propose a differentiable approximation of this function.
+Given the differentiable approximate binning function,
+it is to construct the decision tree via Kronecker product $\otimes$.
+They asserted  that they can exhaustively find all final nodes by
+$$f_1(x_1)\otimes f_2(x_2)\otimes\cdots\otimes f_D(x_D)$$
+where each feature $x_d$ is binned  by its own neural network $f_d(x_d)$.
+Our representation shares the same properties with that work:
+the model can be easily implemented in neural networks tool-kits,
+and trained with gradient descent rather than greedy splitting.
+%http://www.eecs.qmul.ac.uk/~tmh/
+%https://dblp.uni-trier.de/pers/hd/y/Yang:Yongxin
+%https://github.com/wOOL/DNDT
+However, our representation is to describe the decision trees in the computational graph language precisely.
+It is not hybrid or analogous of deep neural network,
+which makes it different from others.
+And our representation is  compatible with categorical feature
+as shown in the section \emph{Categorical Features}.
+Even they are equivalent,
+our model is optimized in the way like binarized neural networks as shown later.
+We formulate the  training of decision trees
+as a constrained continuous optimization problem
+although it is not entirely or elegantly solved.
+
+
+Can we find some invariants of the bitvector matrix $B$?
+Is there other efficient matrix representation of the decision tree structure?
+Is there an intuitive or physical interpretation of the bitvector matrix $B$?
+Is it just another example of unreasonable effectiveness of mathematics in data science?
+Why do we constraint the bitvector matrix in these constraints?
+How can we optimize the decision tree structure?
+There are many problems to solve.
+
+
+\section{An Example of Binary Decision Tree}
+
+Suppose the input variable $x$ has 4 numerical features,
+the learned decision tree is as shown in the following figure \ref{Fig.main1}.
+
+The threshold vector is $t=(1,4,3,2,5)^T$.
+The value vector is  categorical or numerical,
+such as $v=(v_1, v_2, v_3, v_4, v_5, v_6)^T$.
+The selection matrix $S$ and  bit-vector matrix $B$ is
+$$
+\begin{pmatrix}
+1 & 0 & 0 & 0\\
+0 & 1 & 0 & 0\\
+0 & 0 & 1 & 0\\
+0 & 1 & 0 & 0\\
+0 & 0 & 0 & 1
+\end{pmatrix},
+\begin{pmatrix}
+0 & 0 & 1 & 0 & 1\\
+0 & 0 & 1 & 1 & 0\\
+0 & 0 & 1 & 1 & 1\\
+0 & 1 & 1 & 1 & 1\\
+1 & 1 & 0 & 1 & 1\\
+1 & 1 & 1 & 1 & 1\\
+\end{pmatrix},
+$$
+respectively.
+
+\begin{figure}[H] %H为当前位置，!htb为忽略美学标准，htbp为浮动图形
+\centering %图片居中
+\input{Tree-2.tex}
+%\includegraphics[width=0.7\textwidth]{trees.png} %插入图片，[]中设置图片大小，{}中是图片文件名
+\caption{A Binary Decision Tree} %最终文档中希望显示的图片标题
+\label{Fig.main1} %用于文内引用的标签
+\end{figure}
+
+
+Suppose input vector $x=(2,1,2,2)^T$, then the output is given by
+$$T(x)=v[\arg\max(B\,\sigma(Sx-t))]=v_5.$$
+
+Here we do not specify the data types of the elements in the value vector.
+For regression, the value vector $v$ is numerical;
+for classification, it is categorical \footnotemark.
+\footnotetext{See more differences of classification trees and regression trees in
+\href{http://pages.stat.wisc.edu/~loh/treeprogs/guide/wires11.pdf}{Classification and regression trees}.}
+
+
+The first element of bitvector always corresponds to the leftmost leaf in the decision tree
+so that the algorithm return the first value when there is no false node for some inputs such as $(1,1,2, 3)^T$.
+And the order of bitvector is left to right, top to bottom.
+
+
+
+%\section{Others}
+%
+%Compared to deep neural network,
+%gradient boosted decision trees look like a forwards
+%neural networks where each decision tree is like a layer in deep neural network
+%and sends the gradients to next tree when training.
+%In some sense,
+%gradient boost decision trees are composite of decision tree when training.
+%
+%Note that the following relation when building a decision tree
+%$$\frac{\partial L(\mathrm{y}_i, f(x_i))}{\partial f(x_i)}\mid_{f=f_{t-1}}=0\iff L(\mathrm{y}_i, f_{t-1}(x_i))=\arg\min_{y}L(y_i, y)=0.$$
+%In another words, the gradient is always to be 0
+%when the loss is 0.
+%And the outputs is a constant in vanilla
+%decision tree for different input in the same leaf
+%so that the new targets $r_{i,t}$ and $r_{j, t}$ are equal if $x_i, x_j$ are output in the same leaf and $y_i=y_j$.
+%As a result, such pair
+%$x_i, x_j$ tend to be in the same
+%terminal region in the next tree.
+%The sample in the same terminal region
+%with different labels tent to be separated.
+%
+%
+%And different from forwards neural networks,
+%the final result of  gradient boost decision
+%trees is the weighted  sum of the result of each tree not only the last tree.
+%What is worse, gradient boost decision trees
+%cannot be learnt by gradient-based optimization methods.
+
+\section{Structures of Bitvector Matrices}
+
+Not all 0-1 matrix is the bitvector matrix of a decision tree.
+For example, the identity matrix cannot be a bitvector matrix of a decision tree
+because there are at most one $0$ element 0f some columns of the bitvector matrix.
+
+It is obvious that there are some inherent structures in the bitvector matrix $B$.
+There are four rules:
+\begin{enumerate}
+\item there are  the most $0$s in the bitvector of the root node.
+\item there is only one $0$ in the bitvectors of left-leaf-parent nodes.
+\item the left nodes inherit the 1s from their ancestors.
+\item the right nodes inherit the 0s from their parents and shift these 0s to 1s.
+\end{enumerate}
+Here the node $n$ is defined as left-leaf-parent node if its left child node is a terminal node/leaf.
+And we can infer that there is at least one 0 in the bitvector of the root combining the first rule and the second rule.
+The number of zeroes in the bitvectors of the nodes tell how many terminal nodes/leaves are in the left-subtree of this node.
+%And   number of ones in the bitvectors of the nodes tell how many terminal nodes/leaves are in the right of this node.
+The first and the second rule are intuitive and naive.
+The forth and fifth rules are to verify or prove.
+
+If the bitvector matrix is given as following:
+$$
+\begin{pmatrix}
+0 & 0 & 1 & 0 & 1\\
+0 & 0 & 1 & 1 & 0\\
+0 & 0 & 1 & 1 & 1\\
+0 & 1 & 1 & 1 & 1\\
+1 & 1 & 0 & 1 & 1\\
+1 & 1 & 1 & 1 & 1\\
+\end{pmatrix}
+$$
+we can recover the structure of the decision tree:
+\begin{itemize}
+\item from the first rule, we know the first column corresponds to the root node;
+\item from the second rule, we know the third, forth and fifth column correspond to left-leaf-parent nodes;
+\item from the third rule, we know the second, forth and fifth column correspond to left nodes of root;
+\item from the forth rule, we know the third column corresponds to the right node of root.
+\end{itemize}
+What is more, we can infer that the forth node is the left child of the second node
+because they share the same last three 1s;
+the fifth node is the right child of the fourth node
+because it inherits the first 1s from the fourth node and  the fourth node is a left-leaf-parent node.
+\begin{lemma}
+It is a bijective mapping from the  structure of the decision tree to the bitvector matrix $B$.
+\end{lemma}
+
+Thus we also call the matrix $B$ as the structure matrix of the decision tree.
+
+%Graphs can also be represented in the form of matrices. The structure of the decision tree is really a simple graph.
+%Note that there are two types nodes in a decision tree: non-terminals and terminals.
+%We only represent a decision tree as its non-terminals' adjacency  matrix for convenience.
+%For example, the adjacency  matrix of the decision tree in \ref{Fig.main1} is
+%$$
+%\begin{pmatrix}
+%0 & 1 & 1 & 0 & 0\\
+%0 & 0 & 0 & 1 & 0\\
+%0 & 0 & 0 & 0 & 0\\
+%0 & 0 & 0 & 0 & 1\\
+%0 & 0 & 0 & 0 & 0\\
+%\end{pmatrix}.
+%$$
+%Here we regard the decision tree as directed graph.
+%Thus no non-terminal node  directs to the root.
+%However, we cannot recover this decision tree
+%because we cannot recognize the child node is the left or right node.
+
+The number of columns $m$ is less than the number of rows in bitvector matrix $n$.
+For above example, $n-m=1$.
+In another word, the number of non-terminal nodes is less than  the terminal nodes.
+In fact, this difference is always equal to $1$ for all binary decision trees.
+Additionally, we will know the sizes of $S, t, B, v$
+if the input data dimension
+and the number of terminal nodes are given.
+
+As the decision tree shown in figure \ref{Fig.main1},
+the first node must be false and the third node must be true if arriving at the sixth leaf.
+\begin{equation}
+\begin{pmatrix}0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber \end{pmatrix}
+\wedge
+\begin{pmatrix} 1\\ 1\\ 1\\ 1\\ 0\\1 \nonumber\end{pmatrix}=
+\begin{pmatrix} 0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber\end{pmatrix}
+-\{\begin{pmatrix}1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber \end{pmatrix}
+-\begin{pmatrix} 1\\ 1\\ 1\\ 1\\ 0\\1 \nonumber\end{pmatrix}\}
+=\begin{pmatrix}0\\ 0\\ 0\\ 0\\ 0\\1 \nonumber\end{pmatrix}
+\end{equation}
+
+And the first node must be false and the third node must be true if arriving at the fifth leaf.
+\begin{equation}
+\begin{pmatrix}
+0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber
+\end{pmatrix}
+\wedge
+\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}-
+\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 0\\1 \nonumber
+\end{pmatrix}\}=
+\begin{pmatrix}
+0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber
+\end{pmatrix}-
+\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 0\\1 \nonumber
+\end{pmatrix}
+-\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}
+-\begin{pmatrix}
+0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber
+\end{pmatrix}
+\}\}
+=
+\begin{pmatrix}
+0\\ 0\\ 0\\ 0\\ 1\\0 \nonumber
+\end{pmatrix}
+\end{equation}
+
+The first/second/forth node must be true if arriving at the first leaf.
+\begin{equation}
+\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}-
+\begin{pmatrix}
+0\\ 0\\ 0\\ 0\\ 1\\1 \nonumber
+\end{pmatrix}\}
+\wedge
+\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}-
+\begin{pmatrix}
+0\\ 0\\ 0\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}\}
+\wedge
+\{\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}-
+\begin{pmatrix}
+0\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}\}
+=
+\begin{pmatrix}
+1\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}-
+\begin{pmatrix}
+0\\ 1\\ 1\\ 1\\ 1\\1 \nonumber
+\end{pmatrix}
+=
+\begin{pmatrix}
+1\\ 0\\ 0\\ 0\\ 0\\0 \nonumber
+\end{pmatrix}
+\end{equation}
+It is observed that the logical and $\wedge$ is equivalent to rule out the leaves
+where we cannot arrive at some node.
+For example, if the root node is true, we cannot arrive at the fifth and sixth leaves
+which corresponds to the first term in the last equation.
+
+As bitvector defined, we observe that every non-terminal node $n$ is associated with a node
+bitvector (of the same length) $c$,
+acting as a `complement bitmask' that encodes (with 1’s) the set of leaves potential
+to reach at its subtree  whenever $n$ is a true node.
+\begin{defi}
+  The complement $c$ of the bitmask bitvector $b$ is defined by
+     $$b+c=\vec{1}.$$
+\end{defi}
+Here $\vec{1}$ is  a vector of given shape and type,
+filled with ones such as $(1,1,1)^T$.
+
+\begin{defi}
+  The left reachable leaf set of the non-terminal node $n$ is defined as the leaves potential to reach
+whenever the node is false, denoted as $L(n)$
+\end{defi}
+\begin{lemma}
+ The left reachable leaf set of the non-terminal node $n$ only rely on  its  and its parent's bitvectors.
+\end{lemma}
+\begin{proof}
+Let $n, p, b_n, p_n$ denotes the node $n$, the parent node $p$, bitvector of $n$ and $p$, respectively.
+We prove it by induction.
+
+If $n$ is the root, it is trivial.
+
+If $n$ is the left child of the root, it is first to rule out the leaves
+which its parent  cannot reach when its parent is true, i.e.,
+$$h=\vec{1}-p_n.$$
+Then it is time to remove the nodes which can reach when it is false,
+i.e., $$h-\{b_n-p_n\}=\vec{1}-p_n-\{b_n-p_n\}=\vec{1}-b_n.$$
+
+If $n$ is the right child of the root,
+it is first to rule out the left reachable leaf set $L(p)$ of the root, denoted by $h$.
+Then it is time to remove the nodes when the node cannot reach
+when it is false, i.e., $$h-\{b_n-p_n\}.$$
+Here $h$ is determined by this procedure recursively.
+\end{proof}
+
+Thus we can find the sets leaves potential to reach
+whenever the node is true or false.
+
+\begin{lemma}
+The augmented matrix $(B\,\, \vec{1})$ is invertible.
+\end{lemma}
+\begin{proof}
+It is only necessary to prove that
+we can arrive at any leaf/terminal node by elementary column transformation
+rather than the logical `And' $\wedge$ operation.
+The difference of two bitvector of the matrix $B$ means the intersection
+when the given bitvectors are false nodes.
+Because each leaf belongs to its parent's left reachable leaf set or
+corresponds to  its parent's complement vector.
+According to the above lemma, it is equivalent to differences of the bitvectors and $\vec 1$.
+\end{proof}
+%http://mathworld.wolfram.com/01-Matrix.html
+%https://www.researchgate.net/publication/256694515_On_perfect_0_1_matrices
+%https://www.sciencedirect.com/science/article/pii/S0024379519304276
+%https://www.math.tamu.edu/~rowell/
+%http://www.hamilton.ie/skirkland/tnnfinal.pdf
+%http://circuit.ucsd.edu/~yhk/ece154c-spr17/
+%http://www.mathcentre.ac.uk/resources/uploaded/sigma-matrices7-2009-1.pdf
+%https://www.ise.ncsu.edu/fuzzy-neural/wp-content/uploads/sites/9/2016/02/or766_TUM.pdf
+
+\begin{lemma}
+The bitvector matrix is column full-rank as well as its complement bitvector matrix.
+\end{lemma}
+It is easy to prove the following lemma by contradiction.
+\begin{lemma}
+The bitvector $b$ cannot coincide with  its complement bitvector $c$ in the bitvector matrix of a decision tree.
+\end{lemma}
+
+We can arrange the bitvector of non-terminals in the pre-order as in the binary tree traversal for clarity.
+
+It is not supersizing that
+there is an example that the following 0-1 matrix  is not a structure matrix of a decision tree:
+$$
+\begin{pmatrix}
+0 & 0 & 0 & 0 & 1\\
+0 & 0 & 0 & 0 & 0\\
+1 & 1 & 0 & 0 & 1\\
+1 & 1 & 0 & 0 & 1\\
+1 & 0 & 1 & 0 & 1\\
+1 & 1 & 1 & 1 & 1\\
+\end{pmatrix}.
+$$
+
+Given the number of non-terminals $n_L$, we can compute the number of the structure matrices of decision trees denoted by $\mathcal{M}(n)$.
+If $n_L=2$, $\mathcal{M}(2)=2$.
+If $n_L=3$, $\mathcal{M}(3)=5=2\times 3-1$.
+If $n_L=4$, $\mathcal{M}(4)=18=4\times 5 - 2$.
+If $n_L=5$, $\mathcal{M}(5)=?$.
+It is clear that $\mathcal{M}(n_L+1)<\mathcal{M}(n_L)\times (n_L+1)$.
+
+
+
+In general, the bitvector matrix as well as its complement is the representation of ordered binary tree data structure.
+Binary tree is referred to a tree if every node has only two children.
+Ordered tree means that the tree is not oriented.
+
+
+The tree traversal is in the language of matrix computation.
+There are more works to translate the operator of binary tree into matrix computation.
+%https://www.cnblogs.com/gaochundong/p/binary_search_tree.html
+%https://www.geeksforgeeks.org/binary-tree-data-structure/
+%https://mathoverflow.net/questions/18636/number-of-invertible-0-1-real-matrices
+The adjacency matrix of graph cannot describe the  ordered structure of decision tree.
+\href{https://arxiv.org/pdf/1807.00371.pdf}{Dekel Tsur} gives a data structure
+that stores an ordered tree $T$ with $n$ nodes and degree distribution.
+The literatures mentioned there is a good guide
+to design a succinct data structure that stores a tree.
+\href{http://ai.stanford.edu/~wzou/kdd_rapidscorer.pdf}{RapidScorer}
+introduces a modified run length encoding called \textbf{epitome} to the bitvector representation of the tree nodes.
+%https://www.geeksforgeeks.org/combinatorics-ordered-trees/
+%https://bradfieldcs.com/algos/trees/representing-a-tree/
+%https://www.sciencedirect.com/science/article/pii/S0022000011001012
+\href{https://pdfs.semanticscholar.org/b85f/da059a6aa272ded62a467e5c735dd53183b5.pdf}{ Guofang Wei}
+coach a team study the invertibility probability of binary matrices
+%http://oeis.org/A046747
+\href{https://arxiv.org/abs/math/0308050}{Thomas Voigt and Gunter M. Ziegler}
+show that the edges of the  hyperplanes spanned by random 0/1-vectors are equivalent to bounds on e the probability that a random 0/1-matrix.
+%https://www.jstor.org/stable/20161336
+%\href{https://arxiv.org/pdf/math/0411095v4.pdf}{TERENCE TAO AND VAN VU}
+\href{http://web.eecs.umich.edu/~pettie/}{Seth Pettie}
+applies the forbidden 0-1 matrices to search Tree
+and path compression-based data structures.
+%https://core.ac.uk/display/82228417
+https://core.ac.uk/display/82618242
+For more information on 0-1 matrix .
+see the conference \href{http://www.mat.uc.pt/~cmf/01MatrixTheory2010/invited_speakers.html}{Coimbra Meeting on
+0-1 Matrix Theory and Related Topics}.
+% 0-1 matrix by keyword An interlacing theorem for trees @bing
+%http://www.mat.uc.pt/~cmf/papers/eigentree.pdf
+%http://matrix.skku.ac.kr/Series-E/Monthly-E.pdf
+%https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3559027/pdf/nihms424740.pdf
+%http://www.math.univ-toulouse.fr/~fchapon/InterlaceTreev3.pdf
+%http://www.math.univ-toulouse.fr/~fchapon/
+
+Given the number of internal nodes,
+can we find all the possible structure of decision trees?
+Given a bitvector matrix $B$, can we find the selection matrix $S$ and threshold vector $t$?
+
+If the answers to above questions are all `Yes',
+we only need to specify the number of internal nodes
+and then all the structure of  decision tree can be found by a greedy way.
+
+What is the relation of this matrix and the methods to train a decision tree?
+%http://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.68.2517&rep=rep1&type=pdf
+
+\section{Optimization of Decision Trees}
+
+Even  we can find all the structure of the decision trees given the number of internal nodes,
+there are still selection matrix $S$, threshold vector $t$ and value vector $v$ to optimize.
+
+\href{https://www.sciencedirect.com/science/article/abs/pii/S0031320397000058}{Ishwar K. Sethiand Jae H. YOO} use
+a neural learning scheme combining backpropagation and soft competitive
+learning to simultaneously determine the splits  for each node of a tree structure in fixed size
+without any splitting function.
+\href{http://simplecore-dev.intel.com/ai/wp-content/uploads/sites/71/1602.02830v3.pdf}{binarized neural networks}
+are neural networks with binary weights and activations at run-time.
+%\href{https://software.intel.com/en-us/articles/binary-neural-networks}
+%{Binary neural networks are networks with binary weights and activations at run time.}
+%https://www.intel.ai/accelerating-neural-networks-binary-arithmetic/
+\href{https://www.xnor.ai/xnor-net}{XNOR-net} shows some methods to training binary-weights-networks.
+%http://ai2-website.s3.amazonaws.com/publications/XNOR-Net.pdf
+\href{https://arxiv.org/pdf/1901.09731.pdf}{Coarse gradient descent method} is designed for learning
+sparse weight binarized activation neural networks.
+\href{https://www.math.uci.edu/~jxin/BCGD_RMS_2018.pdf}{Blended coarse gradient descent}
+is designed for full quantization of deep neural networks.
+\href{https://ieeexplore.ieee.org/document/1674938}{Payne}
+proposed a way to construct optimal binary decision trees in 1977.
+Optimal decision trees mix optimization methods and decision trees.
+\href{https://ideas.repec.org/a/inm/oropre/v55y2007i2p252-271.html}{Dimitris Bertsimas and Romy Shioda}
+%introduce mixed-integer optimization methods to the classical statistical problems of classification and regression.
+\href{https://link.springer.com/chapter/10.1007/978-3-319-59776-8_8}{Sicco Verwer and Yingqian Zhang}
+%encode the problem of learning the optimal decision tree of a given depth as an integer optimization problem.
+%https://community.fico.com/s/page/a5Q2E000000YIbIUAW/fico1910
+\href{http://jack.dunn.nz/papers/OptimalClassificationTrees.pdf}{Dimitris Bertsimas and Jack Dunn}
+%present Optimal Classification Trees, a novel formulation of the decision tree problem using modern Mixed-Integer Optimization (MIO) techniques.
+\href{http://genoweb.toulouse.inra.fr/~tschiex/CP2019/paper132post.pdf}{H\`{e}l\`{e}ne Verhaeghe et al}
+%use constraint programming to learn decision tree.
+\href{http://www.optimization-online.org/DB_FILE/2018/01/6404.pdf}{Oktay et al}
+%present a mixed integer programming formulation to construct optimal decision trees for categorical features given a prespecified size.
+\href{https://www.researchgate.net/publication/2796065_Optimal_Decision_Trees}{Kristin P. Bennettand Jennifer A. Blue}
+%propose an Extreme Point Tabu Search (EPTS) algorithm that constructs globally optimal decision trees for classification problems.
+%http://homepages.rpi.edu/~bennek
+%https://www.researchgate.net/profile/Kristin_Bennett2
+%https://www.researchgate.net/profile/Yingqian_Zhang4
+\href{http://krvarshney.github.io/pubs/DashMV_icassp2015.pdf}{Sanjeeb Dash, et al}
+\href{http://papers.nips.cc/paper/7716-boolean-decision-rules-via-column-generation.pdf}{Sanjeeb Dash et al}
+%use an integer programmingto formulate to optimally trade classification accuracy for rule simplicity.
+\href{https://yingqianzhang.net/wp-content/uploads/2018/12/VerwerZhangAAAI-final.pdf}{Sicco Verwer and Yingqian Zhang}
+%make the formulation independent from the training data size.
+\href{https://arxiv.org/pdf/1810.06684.pdf}{Murat Firat et al}
+%explores the use of Column Generation (CG) techniques in constructing univariate binary decision trees for classification tasks.
+%https://yingqianzhang.net/publications/
+formulate the optimization of decision tree as constraint optimization problem.
+\href{https://www.ijcai.org/proceedings/2018/0189.pdf}{Nina Narodytska et al}
+develop a SAT based model for computing smallest-size decision trees given training data.
+And these methods can find optimal linear-combination (oblique) splits\footnotemark  for decision trees.
+\footnotetext{In our representation, linear-combination (oblique) splits correspond to real rows of the selection matrix $S$.
+In another word, the selection matrix $S$ can be any matrix in $\mathbb{R}^{N_L\times p}$ for oblique decision trees.}
+\href{https://arxiv.org/abs/1511.04056}{Mohammad Norouzi et al} formulate a convex-concave upper bound
+on the tree’s empirical loss and use stochastic gradient descent to train decision trees.
+Alternative to greedy splitting including almost all Optimal Classification Trees
+is based on the classic representation od decision tree, i.e.,
+the sum of indicator functions.
+It is almost impossible to check
+all the non-greedy training methods of decision trees.
+There is the conference \href{https://cpaior2017.dei.unipd.it/}{CPAIOR} --
+Conference on Integration of Artificial Intelligence
+and Operations Research Techniques in Constraint Programming--
+interested in such topic.
+
+Different from our representation of decision tree,
+\href{https://arxiv.org/abs/1511.04056}{Mohammad Norouzi et al}
+introduce a tree navigation function
+rather than the bitvector matrix $B$.
+And optimal classification tree encodes the information of structure
+into Mixed-Integer-Optimization formulation.
+As known, it is first to describe the structure of decision tree
+via the bitvector matrix.
+
+\begin{figure}[H] %H为当前位置，!htb为忽略美学标准，htbp为浮动图形
+\centering %图片居中
+\input{ot.tex}
+%\includegraphics[width=0.7\textwidth]{ot2.png} %插入图片，[]中设置图片大小，{}中是图片文件名
+\caption{A Toy Example of Oblique Decision Trees} %最终文档中希望显示的图片标题
+\label{Fig.main2} %用于文内引用的标签
+\end{figure}
+
+Our aim is to build a binary decision tree in the case where only the number of
+internal nodes and the dimension of input data are specified.
+So that the structure and splitting points are learnt from the input samples.
+In another word, the representation tuple $(S, t, B, v)$ is learnt from the input samples.
+The difficult is the restriction of bitvector matrix.
+The bitvector matrix $B$ is not only `0-1' valued
+but also subject to the four rules in above section.
+%\href{http://jack.dunn.nz/papers/OptimalClassificationTrees.pdf}{
+%It is well-known that the problem of constructing optimal binary decision treesis NP-hard.}.
+% http://www.cs.toronto.edu/~fleet/research/Papers/supplement-NIPS2015.pdf
+
+A basic idea is to limit the bitvector matrix $B$ to some special form such as
+\href{http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.53.8945}{oblivious decision trees}.
+In another word, we optimize the splitting points $S, t, v$  of the decision tree with pre-specified structure $B$.
+And we can optimize the traversal parameters $B, v$ when the test parameters $S, t$ are given.
+The problem is how to find an alternative minimization methods to find the optimal tree.
+Another idea is to find the whole space that the four rules describe.
+It is clear that the space governed by the four rules is not a linear space
+so that it is not possible to find the bases to
+generate all the bitvector matrices.
+What is worse, it is not convex.
+%If we can find a tree structure generator,
+%we can fix the bitvector matrix $B$ and optimize other parameters.
+
+%\href{http://users.monash.edu/~dld/MMLDecisionTree.html}
+%{MML Decision Trees and Decision Graphs}
+%
+%\href{https://sites.google.com/site/zhangleuestc/incremental-oblique-random-forest}
+%{Robust Visual Tracking Using Oblique Random Forests}
+%
+%\href{http://www.geocomputation.org/1998/61/gc_61.htm}
+%{The Classification of Complex Geographic Datasets:
+% An Operational Comparison of Artificial Neural Network and Decision Tree Classifiers}
+%
+%\href{https://dumas.ccsd.cnrs.fr/LIF/inserm-00090279v1}
+%{Oblique decision trees for spatial pattern detection:
+%optimal algorithm and application to malaria risk.}
+%
+%http://jack.dunn.nz/
+
+A leaf-wise tree growth is proposed  in
+\href{https://papers.nips.cc/paper/6907-lightgbm-a-highly-efficient-gradient-boosting-decision-tree.pdf}{LightGBM}.
+\begin{center}
+  \includegraphics[scale=0.5]{leaf-wise-growth.png}
+\end{center}
+It inspires us to optimize only one node in each step in our framework.
+
+First, we initialize a non-zero bitvector of the root node according to the first rule
+and the other bitvectors are zero vectors as in the coordinate optimization method.
+In this step, we only can split the data to the left or the right of the root node.
+And then we can optimize the first column vector of bitvector matrix $B$, the first row of selection matrix $S$
+and the first element of the threshold vector $t$ by minimizing the `splitting criteria'
+as ordinary decision tree growth.
+For example, if the number of terminal nodes is $6$ and input samples have 4 numerical features,
+the first step is given by
+\begin{equation}\label{equa4}\arg\min_{B, S, t,v}\sum_{i=1}^{N}\ell(y_i, T(x_i))\end{equation}
+where $\ell(\cdot,\cdot)$ is the loss function;$\{(x_i, y_i)\mid i=1,2,\cdots, N\}$ is the training data set;
+$$T(x)=v[\arg\max(\{B\,\,\operatorname{Diag}[D(Sx-t)]\}p)];$$
+and
+$$
+S=\begin{pmatrix}
+s_1 & s_2 & s_3 & s_4 \\
+0 & 0& 0& 0& \\
+0 & 0& 0& 0& \\
+0 & 0& 0& 0& \\
+0 & 0& 0& 0& \\
+\end{pmatrix},
+B=
+\begin{pmatrix}
+0   & 0 & 0 & 0 & 0 \\
+b_2 & 0 & 0 & 0 & 0 \\
+b_3 & 0 & 0 & 0 & 0 \\
+b_4 & 0 & 0 & 0 & 0 \\
+b_5 & 0 & 0 & 0 & 0 \\
+b_6 & 0 & 0 & 0 & 0
+\end{pmatrix},
+t=\begin{pmatrix}
+t_1\\ 0\\ 0\\ 0\\ 0\\
+\end{pmatrix},
+v=\begin{pmatrix}
+v_1\\ v_2\\ v_3\\ v_4\\ v_5\\ v_6
+\end{pmatrix}.
+$$
+Here $s_1,\cdots, s_4, t_1,  v_1,\cdots, v_6\in\mathbb{R}$ and $b_2,\cdots, b_6\in\{0,1\}$.
+Note that the first element of bitvector always corresponds to the leftmost leaf in the decision tree
+so that there is one $0$ in the first column of the matrix $B$.
+We take advantages of numerical optimization methods to
+solve the problem \eqref{equa4}.
+%binarized ReLU is also used binarized neural networks,
+%so that we can optimize the decision trees via the methods
+%which are used to train binarized networks such as
+%\href{https://arxiv.org/pdf/1808.05240.pdf}{Blended Coarse Gradient Descent}.
+%We will show that there are smooth alternatives to binarized ReLU later.
+%https://www.sohu.com/a/230688460_455817
+
+%Another non-differential component of our representation is the $\arg\max(x)$,
+%which returns the index of the first maximum value in vector $x$.
+
+Second, we fix the optimal bitvector of root node
+and  initialize the second column of the bivector according to four rules,
+which correspond to the first left node of the root node.
+Other bitvectors are set to be zeroes.
+At the same time, we optimize the second row of selection matrix $S$ and
+the second element of the threshold vector $t$ by minimizing the `splitting criteria'.
+In this step, the data split into the left nodes of root can be split into the right/left nodes of second node.
+We continue the example in the first step. It is still given by \eqref{equa4} but we fix the optimal parameters
+$s_1^{\ast}, \cdots, s_4^{\ast}, b_2^{\ast},\cdots, b_6^{\ast}, t_1^{\ast}$ returned by the first step:
+$$
+S=\begin{pmatrix}
+s_1^{\ast} & s_2^{\ast} & s_3^{\ast} & s_4^{\ast} \\
+s_1 & s_2 & s_3 & s_4 \\
+0 & 0& 0& 0& \\
+0 & 0& 0& 0& \\
+0 & 0& 0& 0& \\
+\end{pmatrix},
+B=
+\begin{pmatrix}
+0          & b_1 & 0 & 0 & 0\\
+b_2^{\ast} & b_2 & 0 & 0 & 0\\
+b_3^{\ast} & b_3 & 0 & 0 & 0\\
+b_4^{\ast} & b_4 & 0 & 0 & 0\\
+b_5^{\ast} & b_5 & 0 & 0 & 0\\
+b_6^{\ast} & b_6 & 0 & 0 & 0
+\end{pmatrix},
+t=\begin{pmatrix}
+t_1^{\ast}\\ t_2\\ 0\\ 0\\ 0\\
+\end{pmatrix},
+v=\begin{pmatrix}
+v_1\\ v_2\\ v_3\\ v_4\\ v_5\\
+\end{pmatrix}.
+$$
+It is a greedy way to test all legal inheritors of the root node
+$(0,b_2^{\ast},b_3^{\ast},b_4^{\ast},b_5^{\ast},b_6^{\ast})^T$ according to the four rules.
+So we can elect only one legal inheritors of the root node.
+
+Other steps are similar to the second step until all the parameters are found.
+
+\input{op1.tex}
+
+Note that the value vector $v$ is determined in the last step.
+We can optimize this procedure by using the outputs of each step.
+For example, we have known that input samples are split in the left or the right of the root,
+we only use the input samples in the left of the root to optimize the parameters of the second node in the second step.
+In another word, we can reduce the computation of cost function $\sum_{i=1}^{N}\ell(y_i, T(x_i))$.
+It is not always necessary to optimize the decision tree
+according to all the training data at each step like in random forests.
+composite decision tree.
+
+It is mentioned `as only one-step optimal and not overall optimal'.
+It is `block coordinate descent'. Such tree growth method is a modification of the top-down growth method.
+The main drawback of this optimization is that we cannot optimize bitvector matrix $B$.
+We elect legal bitvector of  non-terminal nodes according to the four rules rather
+than update the column vectors of bitvector matrix $B$ by gradient-based optimization method.
+However, we can run the algorithm \ref{DT} many times to find the suboptimal structure.
+%similar to the \href{http://www.iro.umontreal.ca/~lisa/pointeurs/BengioNips2006All.pdf}{layer-wise training}.
+%And \href{https://epubs.siam.org/doi/abs/10.1137/120887679}{Global sublinear rate of convergence}
+%of block coordinate descent type method is established.
+Another drawback is that the cost function is not regularized.
+% https://www.math.ucla.edu/~wotaoyin/papers/bcu/
+% http://www.mit.edu/~dimitrib/PTseng/papers/archive/bcr_jota.pdf
+% https://epubs.siam.org/doi/abs/10.1137/120887679
+% http://mblondel.org/publications/mblondel-mlj2013.pdf
+
+
+
+\section{Categorical Features}
+
+\href{https://www.sciencedirect.com/science/article/pii/B9781558603776500323}{James Dougherty et al}
+found that the performance of the Naive-Bayes algorithm significantly
+improved when features were discretized using an entropy-based method.
+\href{https://cs.nju.edu.cn/zhouzh/zhouzh.files/publication/kbs02.pdf}{Hybrid Decision Tree}
+simulates human reasoning by using
+symbolic learning to do qualitative analysis and using neural learning to do subsequent quantitative analysis.
+\href{https://arxiv.org/abs/1604.06737}{Cheng Guo and Felix Berkhahn}
+embed the categorical features to Euclidean spaces.
+\href{http://learningsys.org/nips17/assets/papers/paper_11.pdf}{CatBoost}
+is a new open-sourced gradient boosting library
+that successfully handles categorical features, where
+``we perform a random permutation of the data set and for each example we
+compute average label value for the example with the same category value placed before the given
+one in the permutation''.
+\href{https://corels.eecs.harvard.edu/corels/index.html}{CORELS (Certifiable Optimal RulE ListS)}
+is a custom discrete optimization technique for building rule lists over a categorical feature space.
+This algorithm provides the optimal solution, with a certificate of optimality.
+%https://corels.eecs.harvard.edu/corels/index.html
+%https://www.kdd.org/kdd2017/papers/view/learning-certifiably-optimal-rule-lists-for-categorical-data
+%http://saedsayad.com/decision_tree.htm
+%https://rise.cs.berkeley.edu/blog/publication/learning-certifiably-optimal-rule-lists-categorical-data/
+%http://alabidan.me/
+%https://people.eecs.berkeley.edu/~elaine/
+%https://petrowiki.org/Decision_tree_analysis
+It is always to take different measures to deal with qualitative and quantitative features.
+
+Categorical features are usually stored in different data format from the numerical features in computer,
+which can provide some qualitative information for prediction.
+The domain/value set of categorical feature is discrete and usually finite.
+Note that there are no arithmetic operations of categorical features.
+The only function we can act on categorical features is to test whether it is of one specific type.
+That is a `yes-no' question.
+%https://tidymodels.github.io/embed/articles/Applications/Tensorflow.html
+%One important issue is how to handle categorical features and classification
+%because these are the superiority of trees.
+
+
+Because we cannot add up the numerical features and categorical features directly,
+we should split embedding representation of categorical features and numerical features in oblique decision tree
+while there is no problem  to test categorical or numerical features in vanilla decision tree \footnotemark.
+
+\footnotetext{The combination of categorical features are discussed in
+\href{http://learningsys.org/nips17/assets/papers/paper_11.pdf}{CatBoost}.
+However, it is Cartesian product of some domains rather than linear combination of different features.}
+
+After embedding the categorical features into real vectors,
+we solve the following optimization problem in vanilla decision trees with categorical features:
+$$\arg\min_{B, S, t, v}\sum_{i=1}^{N}\ell(y_i, T(x_i))$$
+where $S$ is the one-hot row vector  matrix and
+$B$ is the bitvector column matrix constrained by the the four rules .
+The threshold value of categorical feature is also limited in the embedded (discrete) space.
+%Like \eqref{numerical}, the above problem is also a Mixed-Integer Optimization (MIO) problem:
+%\begin{itemize}
+%\item The matrices $S$ and $B$ are binarized;
+%\item The threshold vector $t$ is mixed with discrete and continuous element.
+%\item The value vector is discrete in classification trees and continuous in regression trees.
+%\end{itemize}
+
+As mentioned in the previous section, it is the constraints on the bitvector matrix $B$
+that are not convex.
+Note that the non-negative vector $s\succeq 0$ is one-hot if and only
+if $\|s\|_2^2=\left<s, \mathrm{1}\right>=1$.
+We add such convex constraints to the cost function in the optimization problem \eqref{equa4} and obtain:
+\begin{equation}\label{opt2}
+\begin{split}
+&\arg\min_{B, S, t,v}\sum_{i=1}^{N}\ell(y_i, T(x_i))\\
+&\text{ subject to }s_i\in\mathbb{R}_{+}^{n},\|s_j\|_{2}^2=\left<s_j, \vec{1}\right>=1\quad \forall j\in\{1,\cdots,n_L\}.
+\end{split}
+\end{equation}
+Similar to the algorithm [\ref{DT}], we propose the algorithm [\ref{DT2}]
+to train decision trees with categorical features.
+
+\input{op2.tex}
+
+Now we define the oblique decision trees with categorical features.
+As mentioned above, it is not possible to add up the numerical features and categorical features directly.
+For example, there is no meaning of the sum that equals to your age and gender.
+% saturated model @Bing
+%https://newonlinecourses.science.psu.edu/stat504/node/124/
+% https://learnche.org/pid/PID.pdf?497-02b3
+%https://methods.sagepub.com/reference/the-sage-encyclopedia-of-social-science-research-methods/n889.xml
+%https://learnche.org/pid/design-analysis-experiments/fractional-factorial-designs/saturated-designs-for-screening
+They introduce the dummy variables(sometimes called indicator variable) in statistics and quantitative economy community
+such as \href{https://www.sagepub.com/sites/default/files/upm-binaries/21120_Chapter_7.pdf}{Dummy-Variable
+Regression}.
+\href{http://www.economicswiki.com/economics-tutorials/dummy-variable/}{Economics Wiki} explains that
+``This indicator variable takes on the value of 1 or 0 to indicate the availability or lack of some effect
+that would change the outcome of whatever is being tested."
+If we regard the linear combination of numerical features as classic linear regression
+to test some properties of input sample,
+we generalize the linear regression to dummy-variable regression or regression discontinuity design(RDD).
+Thus we can deal with the categorical features in oblique decision trees without embedding:
+\begin{equation}\label{DTC}
+T(x) =v[\arg\max(B\,\sigma(f(x)))] \\ \nonumber
+\end{equation}
+where $f(x)=(f_1(x), f_2(x), \cdots, f_{n_L}(x))^T$ and $f_{i}(x)$ is the dummy-variable regression.
+
+%dummy or virtual variable @Bing
+%https://stattrek.com/multiple-regression/dummy-variables.aspx
+%https://www.stata.com/manuals13/u25.pdf
+%https://www.moresteam.com/whitepapers/download/dummy-variables.pdf
+%https://www.sagepub.com/sites/default/files/upm-binaries/21120_Chapter_7.pdf
+%https://www.statisticshowto.datasciencecentral.com/dummy-variables/
+%http://www.economicswiki.com/economics-tutorials/dummy-variable/
+%https://eml.berkeley.edu/
+%https://www.nber.org/papers/w14723
+%https://www.nber.org/
+
+%A recursive ℓ∞ -trust-region method for bound-constrained nonlinear optimization
+%https://arxiv.org/abs/1610.10022
+%https://ieeexplore.ieee.org/document/8178999
+%https://link.springer.com/article/10.1007%2Fs10589-018-9983-4
+%http://www.cqvip.com/qk/90986x/2014001/48812082.html
+%https://arxiv.org/pdf/1511.00425v1.pdf
+%http://perso.fundp.ac.be/~phtoint/pubs/TR07-01.pdf
+%https://arxiv.org/abs/1810.10563
+
+In classification, the element of the value vector $v$ is categorical.
+It is not suitable to find the optimal $v$ via gradient-based methods.
+Like in classic decision tree growth, we use the label of the instances of $v_i$
+to find the best value of $v_i$.
+We can apply the loss function for multi-label classification to decision tree
+if we adjust the form of output $v$.
+
+\section{Relaxed Optimization of Decision Trees}
+
+%Without loss of generality, we suppose vector $s$ is the row of matrix $S$
+%and $b$ is the column of the matrix $B$.
+We have the following necessary conditions of bitvector matrix $B$:
+\begin{enumerate}
+\item $b_{m,i}^2=b_{m,i}\in\mathbb{R}$, $b_m=(b_{m,1},\cdots, b_{m, L})^T$;
+\item $\|b_m\|_0=\|b_m\|_1=\|b_m\|_2^2=\left<b_m, \vec{1}\right>=f(m)$;
+\item $f(1)\leq f(m)\in\{1,2,\cdots,n_L\}\quad\forall m$;
+\item $1\leq\left<b_m, b_n\right>\leq n_L -1, {\|b_m-b_n\|}_2^2> 0\quad\forall m\not=n$.
+\end{enumerate}
+Here $b_m, b_n$ are the columns of bitvector matrix
+and $m,n\in\{1,2,\cdots,n_L\}$.
+And we assume that $b_1$ is the bitvector of the root node.
+The first condition constraint the elements in the binary set $\{0, 1\}$.
+The second condition is equivalent to the first condition.
+The last conditions are according to the four rules.
+And we require that the bitvector matrix $B$ satisfies the following condition:
+$$Rank(B)=n_L,  Rank(B\,\,\vec 1)=L=n_L+1.$$
+%https://aol.osu.edu/sites/default/files/uploads/automaticajournal_final.pdf
+%https://www.convexoptimization.com/dattorro/rank_constraint.html
+%https://etd.ohiolink.edu/!etd.send_file?accession=osu1531750343188114&disposition=attachment
+There are some redundancies in these conditions.
+For example, the second condition is the necessary for the first one.
+The problem is the rank condition.
+The invertible 0-1 matrix may have some inherent characteristics.
+%However, these complicated conditions are not equivalent to the four rules.
+
+We formulate decision tree training as the following optimization problem:
+\begin{equation}
+\begin{aligned}\label{equa5}
+&\min_{B, S, t,v}\sum_{i=1}^{N}\ell(y_i, T(x_i))\\
+&\text{subject to}\\
+&\text{$s_j\in\mathbb{R}_{+}^{n},\|s_j\|_{2}^2=\left<s_j, \vec{1}\right>=1\quad \forall j\in\{1,\cdots,n_L\}$;}\\
+&\text{$b_{m,i}^2=b_{m,i},\forall i\in\{1,2,\cdots,L\}$, $\|b_m\|_1=\|b_m\|_2^2=\left<b_m, \vec{1}\right>\leq f(m)$},\\
+&\text{ $f(m)\in\{1,2,\cdots,n_L\},\,\,\forall m\in\{1,2,\cdots,n_L\}$;}\\
+&\text{$1\leq\left<b_m,b_n\right>\leq n_L -1,\,\,\forall m\not=n\in\{1,2,\cdots,n_L\};$ }\\
+&\text{$Rank(B)=n_L, Rank(B\,\,\vec 1)=n_L+1$;}\\
+&\text{$t\in\mathbb{D}_1\times\cdots\mathbb{D}_{n_L-c}\times\mathbb{R}^{c}$ if $Sx\in\mathbb{D}_1\times\cdots\mathbb{D}_{n_L-c}\times\mathbb{R}^{c}$.}
+\end{aligned}
+\end{equation}
+Here $\ell(\cdot,\cdot)$ is the loss function;
+$T(x)=v[\arg\max(B\,\sigma(Sx-t))]$\eqref{tree};
+$\sigma(\cdot)$ is the ReLU function.
+$S=(s_1,\cdots,s_{L-1})^T$, $B=(b_1,\cdots, b_{L-1})$
+and $\mathbb{D}_1,\cdots\mathbb{D}_{n_L-c}$ are embedded (discrete) spaces.
+The last condition is data type constraints.
+The training data set is $\{(x_n, y_n)\mid x_n\in\mathrm{X}\subset\mathbb{R}^{p}, y_n\in\mathrm{Y}\in\mathbb R\}$ for $n=1,2,\cdots, N$.
+
+It is really a hybrid optimization: equality, inequality, rank constrained.
+It is too complex and weird to describe the structure matrix space governed by the four rules.
+
+Can we apply blended coarse gradient descent to update all the parameters of the decision tree?
+If the matrix $B$ is not a bitvector matrix of a decision tree,
+does this expression make some sense?
+
+\section{Super Models of Decision Trees}
+
+Before answering the question in the previous section, we revisit the generalization of decision trees.
+\href{http://pages.stat.wisc.edu/~loh/treeprogs/guide/grapes.pdf}{Probal Chaudhuri et al }
+propose generalized regression trees
+by blending tree-structured nonparametric regression and
+adaptive recursive partitioning with maximum likelihood estimation.
+\href{https://epub.wu.ac.at/676/1/document.pdf}{Torsten Hothorn et al} embed tree-structured regression models
+into a well defined theory of conditional inference procedures.
+\href{https://www.researchgate.net/publication/261660212_Maximum_Likelihood_Regression_Trees}{Xiaogang Su et al}
+propose a method of constructing regression trees within the framework of maximum likelihood.
+\href{http://pages.stat.wisc.edu/~loh/treeprogs/guide/LohISI14.pdf}{Wei-Yin Loh}
+surveys the developments and briefly reviews
+the key ideas behind some of the modern major decision tree algorithms.
+\href{https://www.researchgate.net/profile/Richard_Berk}{Richard A. Berk} overviews the decision tree algorithms
+in the monograph \emph{Statistical Learning from A Regression Perspective}.
+Recently, \href{https://arxiv.org/abs/1906.10179}{Lisa Schlosser et al}
+unify three popular  unbiased recursive partitioning approaches.
+These generalization focus on the statistical inference.
+
+In computer science community, hybrid decision trees integrate decision trees with other algorithms such as
+\href{https://cs.nju.edu.cn/zhouzh/zhouzh.files/publication/kbs02.pdf}{Hybrid Decision Tree},
+\href{https://dl.acm.org/citation.cfm?id=2596353}{A hybrid decision tree classifier},
+\href{https://sci2s.ugr.es/keel/pdf/algorithm/articulo/DT-GA.pdf}{A Hybrid Decision Tree/Genetic Algorithm}.
+\href{https://link.springer.com/chapter/10.1007/978-981-10-1678-3_8}{Archana Panhalkar and Dharmpal Doye}
+elaborate the various approaches of converting decision tree to hybridized decision tree.
+%https://dblp.uni-trier.de/db/journals/prl/prl98.html
+
+In this section, we will show how to generalize the parameterized decision trees.
+
+There are many activation functions in deep neural network such as
+\href{https://arxiv.org/abs/1611.01491}{ReLU},
+\href{https://arxiv.org/pdf/1502.01852.pdf}{parametric ReLu},
+\href{https://arxiv.org/pdf/1710.05941.pdf}{Swish},
+\href{https://arxiv.org/abs/1908.08681}{Mish}.
+There are a partial list of activation functions in deep neural network at
+\href{https://www.simonwenkel.com/2018/05/15/activation-functions-for-neural-networks.html}{Simon's blog}
+and a more comprehensive list of activation functions
+at \href{https://en.wikipedia.org/wiki/Activation_function}{Wikipedia}.
+They are motivated initially to solve the vanishing gradient problem
+and boost the stability and robust generalization.
+In our models, the activation function is non-differential binarized ReLU, a modified sign function.
+If we want to diversify the activation functions of decision trees,
+these activation functions may help.
+Any cumulative distribution function $\sigma$ is an approximation of the binarized ReLU
+if its support is $(0,\infty)$ so that if $x\leq 0$ then $\sigma(x)=0$
+otherwise $\sigma(x)>0$ and $\lim_{x\to\infty}\sigma(x)=1$.
+
+
+Now we generalize the bitvector matrices to all 0-1 matrices
+and the vector $p$ to a real vector variable ,i.e., $p\in\mathbb{R}^{n_L}$,
+and use a softmax function to output the leaf distributions.
+For regression task, we obtain the following generalized decision tree:
+\begin{equation}\label{GT}
+T(x)=\left<v, \operatorname{softmax}{B\,\sigma(Sx-t)}\right>
+\end{equation}
+where the vector $v$ is the numerical value vector;
+the function $\operatorname{softmax}$ returns a discrete probability distribution
+as approximation to one-hot vector;
+the matrix $B$ is a 0-1 matrix;
+the element-wise transformation $\sigma(\cdot)$ is the activation function;
+the matrix $S$ is a real matrix associated with the decision tree;
+the vector $x$ is the input data;
+the vector $t$ is real.
+
+This representation is the minimal extension of decision trees,
+where we  set the bitvector free from the four rules.
+If the bitvector is extended to real vector space,
+the decision tree is sparse in the new representation.
+If we still keep the bitvector in binary space,
+the decision tree is still common in our new representation.
+The softmax function is used to normalize the outputs as one probability distribution.
+That is also we do not restrict $p$ in the positive real vector set.
+We convert the tree traversal to its stochastic version.
+This extension includes the decision tree.
+In another word, our new representation is the super set of decision tree.
+%beyond  the scope of current machine learning community.
+
+\href{https://arxiv.org/pdf/1611.01144.pdf}{Eric Jang et al.} present an
+efficient gradient estimator that replaces the non-differentiable sample
+from a categorical distribution with a differentiable sample
+from a novel Gumbel-Softmax distribution.
+Such method helps us to design alternatives of the $\operatorname{softmax}$.
+%\href{https://arxiv.org/pdf/1305.2982.pdf}{Yoshua Bengio}
+%https://blog.csdn.net/yiqingyang2012/article/details/77936222
+%https://gabrielhuang.gitbooks.io/machine-learning/reparametrization-trick.html
+%https://www.ntu.edu.sg/home/lixiucheng/paper/gumbel-softmax.html
+%https://blog.evjang.com/2016/11/tutorial-categorical-variational.html
+%https://www.ntu.edu.sg/home/lixiucheng/
+%http://evjang.com/
+
+In this setting, it is analogous to the shallow  neural network.
+If the bitvector matrix is the gene of decision tree,
+this setting is the revolutionary mutation and
+numerical optimization  is genome editing to train these models.
+It is a dilemma of dimension: more outputs nodes, higher accuracy and less outputs nodes, less training cost.
+
+All the operators are common in deep learning:
+matrix multiplication, ReLU and softmax.
+There are one affine layer, a nonlinear layer and a softmax layer.
+%https://github.com/HarisIqbal88/PlotNeuralNet
+%https://arxiv.org/pdf/1704.07657.pdf
+In some sense, decision trees are special type neural networks.
+We call those models `generalized decision trees'.
+This representation is `mixed-precision'
+because only $B$ is 0-1 valued \footnotemark
+\footnotetext{In vanilla binary decision tree,
+the selection matrix is also 0-1 valued.
+Here we focus on oblique decision trees.}
+and other parameters are real.
+
+We focus on the update formula of binary matrix $B$.
+Now we take a thought experiment, what does it mean
+when one bit changes into 1 from 0 when updating the binary matrix?
+If the gradient is 0, nothing change after updating the binary matrix $B$.
+In anther word, the gradient is not 0
+if one bit changes into 1 from 0 when updating the binary matrix.
+The problem is how to binarize the gradients.
+If the gradient is close to 0, it is not supposed to update one bit from 1 to 0 or reverse.
+If the gradient is larger than 1, it is supposed to update the bit from 1 to 0 or reverse.
+Another scheme is to train the model
+via gradient-based or other numerical optimization methods,
+and after that binarize the bitvector matrix $B$.
+%\href{https://sites.wp.odu.edu/icmds2018/wp-content/uploads/sites/8362/2018/11/ODU2018_Xin.pdf}{}
+%https://apps.dtic.mil/dtic/tr/fulltext/u2/a247397.pdf
+It is also the case when we binarize the deep neural network models.
+It is possible to  apply the coarse gradient descent method  to update the binary matrix $B$.
+%https://allenai.org/plato/xnornet/
+
+Our framework can include more hybrid trees.
+For example, the tests are still linear functions, univariate or multivariate.
+We can replace them with nonlinear functions $f=(f_1,\cdots,f_{n_L})^T$:
+\begin{equation}\label{GT1}
+  T(x)=v[\arg\max(B\,\sigma(f(x)))].\nonumber
+\end{equation}
+If we still obey the four rules, it is still a decision tree type algorithms.
+If we set the bitvector free from the four rules,
+it is a generalized decision tree with nonlinear test function.
+Thus we could apply kernel tricks to decision tree.
+%http://www.cs.jhu.edu/~ayuille/courses/Stat161-261-Spring14/2014LectureNote9.pdf
+
+The output also can substitute with nonlinear functions $f=(f_1,\cdots,f_{L})^T$.
+\begin{equation}\label{GT2}
+\begin{split}
+  T(x) &=\left<\operatorname{softmax}(B\,\sigma(Sx-b)), f(x)\right> \\ \nonumber
+       &=\sum_{i=1}^{L}e_i f_i(x)\nonumber.
+\end{split}
+\end{equation}
+Here $(e_1,\cdots,e_l)^T=\operatorname{softmax}(B\,\sigma(Sx-b))$.
+These are ``Multivariate Adaptive Regression Splines''.
+%spline  regression@Bing
+%http://www.statpower.net/Content/313/Lecture%20Notes/Splines.pdf
+%http://support.sas.com/resources/papers/proceedings16/5621-2016.pdf
+%http://www.statpower.net/
+
+
+
+
+\iffalse
+\section{Deep Composite Trees}
+
+\href{https://arxiv.org/pdf/1704.07657.pdf}{Dmitry Ignatov and Andrey Ignatov}
+propose the  `Decision Stream Training'.
+\href{https://arxiv.org/abs/1702.07360}{Neural Decision Trees} are
+synergistic melting of neural networks and decision trees.
+\href{https://www.ijcai.org/Proceedings/16/Papers/628.pdf}{Deep Neural Decision Forests}
+enrich classification trees with the representation learning ability of
+deep (neural) networks within an end-to-end trainable architecture.
+%Categorical Reparameterization @bing
+%https://www.worldscientific.com/doi/10.1142/S021800141351004X
+%https://www.ncbi.nlm.nih.gov/pubmed/23366079
+In \href{https://academic.oup.com/nsr/article/6/1/74/5123737}{Deep Forest},
+it is conjectured that the success of deep neural networks owes much to three characteristics,
+i.e. layer-by-layer processing, in-model feature transformation and sufficient model complexity.
+Tree-based methods are supposed to be alternative to deep neural network
+when processing tabular dense data.
+However, there is no composite of decision tree as step function.
+In some sense, there are only additive decision trees
+such as \emph{random forest} and \emph{gradient boost decision tree}.
+We would ask the questions:
+Why is there  no `multiplicative decision tree'?
+Is there  another way to ensemble the decision trees?
+How can we blend different decision trees to boost their accuracy?
+Can we construct a counterpart of deep neural network based on decision trees?
+
+In vanilla decision tree, the output is a single value to represent the response.
+Almost valuable raw information compressed into the output and vanished.
+We can do nothing with such single output.
+There is no in-model feature transformation.
+Generalized decision tree\eqref{GT} use $\operatorname{softmax}$
+to output a discrete distribution instead of the $\arg\max$.
+It is a `re-parameterization trick'
+that preserves some raw information of the input.
+We will answer other questions in the next subsection.
+
+We take some strategy to make a novel model hold the three characteristics
+in the conjecture of deep learning success.
+
+\subsection{Ensemble Generalized Decision Trees}
+
+
+Sufficient model complexity  requires to ensemble the shallow generalized decision trees.
+
+Analogous to binarized neural network, we can stack these trees into a deep model
+regarding this generalized decision tree as a special block.
+In some sense, we obtain the composite decision trees
+as a novel ensemble method of decision trees.
+We call this model  deep composite tree:
+\begin{equation}\label{DCT}
+  T_n(\cdots T_1( T_0(x))\cdots)
+\end{equation}
+where $T_i$ is a `generalized decision tree`\eqref{GT}.
+It is a pipeline,
+i.e., the  output of $T_{i-1}$ is the input of the successive block $T_i$ for $i=1,\cdots, n$.
+In another word, deep composite tree is layer-by-layer processing.
+In each block, the sample are grouped by their features
+and output into each guess.
+Because each block is a decision tree,  the output of each block make sense
+and labels are used at each block.
+%And we can prune the block after training as usual.
+
+This brings a drawback:
+the number of terminal nodes is large for classification task,
+which is larger than the number of categories
+if it can predict every label.
+So it is a wide and deep model.
+
+%\href{https://projecteuclid.org/euclid.aos/1016218223}{AdaBoost}
+%is considerred as additive nonlinear model.
+\href{http://blog.shakirm.com/ml-series/a-statistical-view-of-deep-learning/}{Shakir}
+looks at the view of deep neural networks as recursive generalized linear models.
+They share the same statistical basics: recursive nonlinear model.
+%Adaboost  a statistical view@Bing
+%https://jialinyi94.github.io/CIS_625_Final_Project.pdf
+%https://projecteuclid.org/euclid.aos/1016218223
+%https://duvenaud.github.io/learning-to-search/
+
+Deep composite trees are recursive and
+generalized decision trees are nonlinear model.
+In fact, tree is recursively defined.
+And  if we replace the $\operatorname{softmax}$ with the activation function $\sigma$
+in the hidden layers, it is exactly the forward neural network,
+where a block $T_i$  is two layers consisting of hidden states
+except the bitvector matrices are binary.
+It holds the three characteristics
+--layer-by-layer processing, in-model feature transformation and sufficient model complexity
+It is not supervised why deep neural networks work so well in many fields.
+
+
+And deep composite tree is modular configurable and extensible.
+It is potential to be the counterpart of binarized neural network and deep forest.
+
+
+
+\subsection{The Residual and Highway Structure}
+
+The  residual or highway structure may help to make it stable:
+\begin{equation}\label{Res}
+  \begin{split}
+    O_n(x) &=T_n(O_{n-1}(x))+ O_{n-1}(x)\\ \nonumber
+    T_{n+1}(x)&= T_{n+1}(O_{n}(x) + O_{n-1}(x))\\ \nonumber
+  \end{split}
+\end{equation}
+
+
+It benefits from the differential or non-differential training methods, gradient-based or non-gradient based
+optimization methods.
+
+\subsection{Feedback Structures}
+
+Like gradient boost machine, we can send the gradient to the next block to train the decision tree.
+It is so-called `block-wise' training.
+Like the optimization of vanilla decision tree,
+we can use block coordinate descent to optimize each  block such as algorithm [\ref{DT}], [\ref{DT2}].
+
+Another challenge is to integrate the convolution operation to process images.
+If the selection matrices perform the convolution operation,
+how can we adapt the associated parameters such as biased vector, the bitvector matrix?
+Is it possible to extend such deep composite trees to some feedback structure
+such as recurrent neural network and long-short time memory?
+Can we apply these model to natural language processing tasks?
+And can we apply these model to graph processing as geometric deep learning model?
+
+It may not be rational to obsess about pursuit of the deep models.
+
+Such deep decision tree is to test in practice.
+
+
+There are many theoretical concerns we do not discuss such as
+the complexity  of the new representation, convergence of new optimization methods.
+%https://padeoe.com/%E6%B7%B1%E5%BA%A6%E6%A3%AE%E6%9E%97/
+%https://www.leiphone.com/news/201908/cGWbGlnRhSXUSFvr.html
+%https://www.ijcai19.org/invited-talks.html
+%https://cs.nju.edu.cn/zhouzh/zhouzh.files/publication/fcs18tmd.pdf
+%https://arxiv.org/abs/1702.08835
+%https://arxiv.org/abs/1709.09018
+\fi
+\bibliographystyle{plain}
+\bibliography{reference}
+\end{document}
